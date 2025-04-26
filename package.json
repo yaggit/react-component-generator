@@ -1,0 +1,33 @@
+{
+  "name": "react-component-generator",
+  "version": "1.0.0",
+  "description": "CLI tool to generate React components using Hugging Face AI",
+  "main": "src/index.js",
+  "bin": {
+    "generate-component": "./bin/cli.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node ./bin/cli.js"
+  },
+  "keywords": [
+    "react",
+    "component",
+    "generator",
+    "cli",
+    "huggingface",
+    "ai"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.2",
+    "chalk": "^4.1.2",
+    "commander": "^11.1.0",
+    "inquirer": "^8.2.6",
+    "ora": "^5.4.1"
+  },
+  "engines": {
+    "node": ">=12.0.0"
+  }
+}
