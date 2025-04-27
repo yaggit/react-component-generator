@@ -1,4 +1,3 @@
-// react-component-generator/src/index.js
 const fs = require('fs');
 const path = require('path');
 const { program } = require('commander');
@@ -16,17 +15,76 @@ program
 program
   .option('-n, --name <name>', 'Component name')
   .option('-p, --prompt <prompt>', 'Component description/prompt')
-  .option('-m, --model <model>', 'Hugging Face model to use', 'Salesforce/codet5-base')
+  .option('-m, --model <model>', 'Hugging Face model to use', 'microsoft/bitnet-b1.58-2B-4T')
   .option('-t, --tailwind', 'Use Tailwind CSS')
   .option('-b, --bootstrap', 'Use Bootstrap')
   .option('-o, --output <path>', 'Output directory', 'src/components')
-  .option('-f, --force', 'Overwrite existing components');
+  .option('-f, --force', 'Overwrite existing components')
+  .option('-d, --debug', 'Show raw model output for debugging');
 
 program.parse(process.argv);
 const options = program.opts();
 
+// Pre-defined component templates
+const componentTemplates = {
+  tailwind: (componentName) => `import React from 'react';
+import PropTypes from 'prop-types';
+
+const ${componentName} = ({ children, className, ...props }) => {
+  return (
+    <div className={\`\${className || ''}\`} {...props}>
+      {children}
+    </div>
+  );
+};
+
+${componentName}.propTypes = {
+  children: PropTypes.node,
+  className: PropTypes.string,
+};
+
+export default ${componentName};
+`,
+  bootstrap: (componentName) => `import React from 'react';
+import PropTypes from 'prop-types';
+import 'bootstrap/dist/css/bootstrap.min.css';
+
+const ${componentName} = ({ children, className, ...props }) => {
+  return (
+    <div className={\`\${className || ''}\`} {...props}>
+      {children}
+    </div>
+  );
+};
+
+${componentName}.propTypes = {
+  children: PropTypes.node,
+  className: PropTypes.string,
+};
+
+export default ${componentName};
+`,
+  default: (componentName) => `import React from 'react';
+import PropTypes from 'prop-types';
+
+const ${componentName} = ({ children, ...props }) => {
+  return (
+    <div {...props}>
+      {children}
+    </div>
+  );
+};
+
+${componentName}.propTypes = {
+  children: PropTypes.node,
+};
+
+export default ${componentName};
+`
+};
+
 // Validate Hugging Face API key
-const HF_API_KEY = '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';
+const HF_API_KEY = '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'
 if (!HF_API_KEY) {
   console.error(chalk.red('Error: Hugging Face API key not found.'));
   console.log(chalk.yellow('Please set your Hugging Face API key as an environment variable:'));
@@ -58,6 +116,26 @@ async function promptForMissingOptions() {
     });
   }
 
+  // Only ask for model if not provided
+  if (!options.model) {
+    questions.push({
+      type: 'list',
+      name: 'model',
+      message: 'Choose an AI model (free tier compatible):',
+      choices: [
+        'microsoft/phi-2',
+        'codellama/CodeLlama-7b-hf',
+        'gpt2',
+        'distilgpt2',
+        'bigcode/starcoderbase',
+        'Salesforce/codegen-350M-mono',
+        'EleutherAI/pythia-160m',
+        'EleutherAI/gpt-neo-125m',
+        'facebook/incoder-1B'
+      ]
+    });
+  }
+
   if (!options.tailwind && !options.bootstrap) {
     questions.push({
       type: 'list',
@@ -72,6 +150,7 @@ async function promptForMissingOptions() {
   // Update options with answers
   if (answers.name) options.name = answers.name;
   if (answers.prompt) options.prompt = answers.prompt;
+  if (answers.model) options.model = answers.model;
   if (answers.cssFramework === 'Tailwind') options.tailwind = true;
   if (answers.cssFramework === 'Bootstrap') options.bootstrap = true;
 }
@@ -99,29 +178,78 @@ Generate a complete React functional component named ${formatComponentName(optio
 ${options.prompt}
 
 The component should be ${frameworkInfo}.
-Include imports, prop types, and a default export.
-Only provide the JavaScript/JSX code without explanation.
+Include imports at the top (React, PropTypes), the functional component definition, prop types, and a default export.
+ONLY provide the JavaScript/JSX code, no explanation or comments outside the code.
+
+Example format:
+import React from 'react';
+import PropTypes from 'prop-types';
+
+const ComponentName = (props) => {
+  return (
+    // JSX here
+  );
+};
+
+ComponentName.propTypes = {
+  // prop types here
+};
+
+export default ComponentName;
     `;
 
     // Call Hugging Face API
     const response = await axios.post(
-      `https://api-inference.huggingface.co/models/${options.model? options.model : 'openai-community/gpt2'}`,
+      `https://api-inference.huggingface.co/models/${options.model}`,
       { inputs: engineeringPrompt },
       {
         headers: {
-          'Authorization': `Bearer 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`,
+          'Authorization': `Bearer ${HF_API_KEY}`,
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: 60000 // 60 second timeout
       }
     );
 
-    spinner.succeed('Component generated successfully');
-    console.log('Generate code:', response.data[0].generated_text);
+    spinner.succeed('AI response received');
+    
     // Extract component code from response
-    let componentCode = response.data[0].generated_text;
+    let componentCode;
+    if (Array.isArray(response.data)) {
+      componentCode = response.data[0].generated_text;
+    } else if (typeof response.data === 'object' && response.data.generated_text) {
+      componentCode = response.data.generated_text;
+    } else {
+      componentCode = String(response.data);
+    }
+    console.log('AI response:', response.data[0].generated_text);
+    
+    // Debug mode - show raw output
+    if (options.debug) {
+      console.log(chalk.yellow('---- DEBUG: Raw AI Output ----'));
+      console.log(componentCode);
+      console.log(chalk.yellow('---- End of Raw Output ----'));
+    }
     
     // Cleaning up the response to extract just the component code
     componentCode = extractCodeFromResponse(componentCode);
+    
+    // Validate the extracted code
+    if (!validateComponentCode(componentCode, formatComponentName(options.name))) {
+      spinner.warn('Generated code may not be valid. Using a template instead.');
+      
+      // Use template based on CSS framework
+      if (options.tailwind) {
+        componentCode = componentTemplates.tailwind(formatComponentName(options.name));
+      } else if (options.bootstrap) {
+        componentCode = componentTemplates.bootstrap(formatComponentName(options.name));
+      } else {
+        componentCode = componentTemplates.default(formatComponentName(options.name));
+      }
+      
+      // Apply the prompt as a comment
+      componentCode = `// ${options.prompt}\n${componentCode}`;
+    }
     
     return componentCode;
   } catch (error) {
@@ -131,12 +259,20 @@ Only provide the JavaScript/JSX code without explanation.
       console.error(chalk.red(`Status: ${error.response.status}`));
       console.error(chalk.red(`Details: ${JSON.stringify(error.response.data)}`));
     }
-    process.exit(1);
+    
+    // Use template based on CSS framework as fallback
+    console.log(chalk.yellow('Using a template instead.'));
+    if (options.tailwind) {
+      return componentTemplates.tailwind(formatComponentName(options.name));
+    } else if (options.bootstrap) {
+      return componentTemplates.bootstrap(formatComponentName(options.name));
+    }
+    return componentTemplates.default(formatComponentName(options.name));
   }
 }
 
 function extractCodeFromResponse(text) {
-  // Find code between backticks or just take the whole response if no code block is found
+  // Find code between backticks or code blocks
   const codeBlockRegex = /```(?:jsx?|tsx?|react)?\s*([\s\S]*?)```/;
   const match = text.match(codeBlockRegex);
   
@@ -144,15 +280,58 @@ function extractCodeFromResponse(text) {
     return match[1].trim();
   }
   
-  // If no code block, try to find just the component part
-  const importRegex = /^import.*React/m;
-  const startIndex = text.search(importRegex);
+  // If no code block, try to find just the component part by looking for import statements
+  const importRegex = /import\s+React/i;
+  const importMatch = text.match(importRegex);
   
-  if (startIndex !== -1) {
+  if (importMatch) {
+    const startIndex = text.indexOf(importMatch[0]);
+    
+    // Try to find end by looking for export default statement
+    const exportRegex = /export\s+default\s+\w+;?/i;
+    const exportMatch = text.match(exportRegex);
+    
+    if (exportMatch) {
+      const endIndex = text.indexOf(exportMatch[0]) + exportMatch[0].length;
+      return text.substring(startIndex, endIndex).trim();
+    }
+    
+    // If we found import but not export, take from import to end
     return text.substring(startIndex).trim();
   }
   
-  return text.trim();
+  // Strip common boilerplate text that models might include
+  let cleanedText = text;
+  
+  // Remove any instructions that might be in the output
+  cleanedText = cleanedText.replace(/The component should be.*?styling\./, '');
+  cleanedText = cleanedText.replace(/Include imports.*?export\./, '');
+  cleanedText = cleanedText.replace(/Only provide.*?explanation\./, '');
+  
+  cleanedText = cleanedText.replace(/BUILD SUCCESS.*$/ms, '');
+  
+  return cleanedText.trim();
+}
+
+function validateComponentCode(code, componentName) {
+  // Basic validation for component code
+  const hasImportReact = /import\s+.*?React/.test(code);
+  const hasComponentDefinition = new RegExp(`(function|const|let|var)\\s+${componentName}\\s*=`).test(code);
+  const hasExport = /export\s+default/.test(code);
+  
+  // If any of these basic checks fail, return false
+  if (!hasImportReact || !hasComponentDefinition || !hasExport) {
+    return false;
+  }
+  
+  // Look for suspicious patterns indicating malformed code
+  const hasSuspiciousOutput = /output\.js:|output\.html:|<table>|<tbody>|The component should be/.test(code);
+  
+  if (hasSuspiciousOutput) {
+    return false;
+  }
+  
+  return true;
 }
 
 // Save the component to file
